@@ -6,6 +6,5 @@ users:
     ssh_authorized_keys:
       - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAycb0ANZq7GtnwL/LD2evVP2Hdhv/OzAIKvc71qTde7 diego.amicabile@gmail.com
 
-package_update: true
 
 final_message: "VM is ready! SSH with: ssh ubuntu@VM_IP"

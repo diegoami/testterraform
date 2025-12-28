@@ -11,53 +11,101 @@ provider "libvirt" {
   uri = "qemu:///system"
 }
 
+# Create a storage pool if needed
+# Create a storage pool if needed
+resource "libvirt_pool" "default" {
+  name = "default"
+  type = "dir"
+  target = {
+    path = "/var/lib/libvirt/images"
+  }
+}
+
 # Download Ubuntu cloud image
-resource "libvirt_volume" "ubuntu_base" {
-  name   = "ubuntu-base.qcow2"
-  pool   = "default"
-  source = "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
-  format = "qcow2"
-}
-
-# Create VM disk from base image
+# Download Ubuntu cloud image
 resource "libvirt_volume" "vm_disk" {
-  name           = "test-vm-disk.qcow2"
-  base_volume_id = libvirt_volume.ubuntu_base.id
-  pool           = "default"
-  size           = 10737418240  # 10GB
+  name   = "ubuntu-22.04.qcow2"
+  pool   = libvirt_pool.default.name  # Reference the resource
+  create = {
+    content = {
+      url = "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
+    }
+  }
 }
 
-# Cloud-init disk
+
+# Cloud-init config
+data "template_file" "user_data" {
+  template = file("${path.module}/cloud-init.yaml")
+}
+
 resource "libvirt_cloudinit_disk" "commoninit" {
   name      = "commoninit.iso"
-  user_data = file("${path.module}/cloud-init.yaml")
+  user_data = data.template_file.user_data.rendered
+  meta_data = yamlencode({
+    instance-id    = "vm-01"
+    local-hostname = "test-vm"
+  })
 }
 
-# Define the VM
+# Define VM
 resource "libvirt_domain" "test_vm" {
-  name   = "test-vm"
-  memory = "2048"  # 2GB RAM
-  vcpu   = 2
-
-  cloudinit = libvirt_cloudinit_disk.commoninit.id
-
-  network_interface {
-    network_name   = "default"
-    wait_for_lease = true
+  name        = "test-vm"
+  memory      = 2048
+  memory_unit = "MiB"
+  vcpu        = 2
+  type        = "kvm"
+  
+  os = {
+    type         = "hvm"
+    type_arch    = "x86_64"
+    type_machine = "q35"
+    boot_devices = [
+      { dev = "hd" },
+      { dev = "network" }
+    ]
   }
-
-  disk {
-    volume_id = libvirt_volume.vm_disk.id
-  }
-
-  console {
-    type        = "pty"
-    target_type = "serial"
-    target_port = "0"
+  
+  devices = {
+    disks = [
+      {
+        source = {
+          file = {
+            file = libvirt_volume.vm_disk.path
+          }
+        }
+        target = {
+          dev = "vda"
+          bus = "virtio"
+        }
+      },
+      {
+        source = {
+          file = {
+            file = libvirt_cloudinit_disk.commoninit.path
+          }
+        }
+        target = {
+          dev = "vdb"
+          bus = "virtio"
+        }
+      }
+    ]
+    interfaces = [
+      {
+        model = {
+          type = "virtio"
+        }
+        source = {
+          network = {
+            network = "default"
+          }
+        }
+      }
+    ]
   }
 }
 
-# Output the VM's IP address
 output "vm_ip" {
-  value = libvirt_domain.test_vm.network_interface[0].addresses[0]
+  value = "Run 'virsh domifaddr test-vm' to get IP address"
 }
